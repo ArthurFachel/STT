@@ -55,44 +55,66 @@ if "messages" not in st.session_state:
 col1, col2 = st.columns([4, 1])
 
 with col1:
-    inputtext = st.text_input("Type your message here:")
+    inputtext = st.text_input("Digite sua pergunta aqui:")
 
 for message in st.session_state.messages:
     css_class = "user-message" if message["role"] == "user" else "assistant-message"
     st.markdown(f'<div class="{css_class}">{message["content"]}</div>', unsafe_allow_html=True)
 
 with col2:
-    audio_recording = st.audio_input("Record", key="audio_input")
+    audio_file = st.audio_input("Record")
 
-# def transcribe_audio(file):
-#     audio_file = file.getvalue()  # Get audio data from the uploaded file
-#     audio_stream = io.BytesIO(audio_file)  # Convert to a binary stream
+def transcribe_audio(file):
+    # Devagar 
+    #ja tentei alterar de .wav para mp3, sem sucesso
 
-#     transcription = client.audio.transcriptions.create(
-#         model="openai/whisper-large-v3-turbo",
-#         file=audio_stream
-#     )
+    import io
+    from pydub import AudioSegment
+
+    audio_stream = file.read()
+    audio_format = file.name.split('.')[-1].lower()
     
-#     return transcription['text'] 
-# if audio_recording:
-#     with st.spinner("Transcribing audio..."):
-#         transcribed_text = transcribe_audio(audio_recording)
+    if audio_format != 'mp3':
+        audio = AudioSegment.from_file(io.BytesIO(audio_stream), format=audio_format)
+        mp3_audio = io.BytesIO()
+        audio.export(mp3_audio, format="mp3")
+        mp3_audio.seek(0)
+        audio_stream = mp3_audio.read()
     
-#     st.markdown(f'<div class="user-message">{transcribed_text}</div>', unsafe_allow_html=True)
+    transcription = client.audio.transcriptions.create(
+        model="openai/whisper-large-v3-turbo",
+        file=io.BytesIO(audio_stream),
+    )
 
-#     with st.spinner("Generating response..."):
-#         completion = client.completions.create(
-#             model=st.session_state["deepinfra_model"],
-#             prompt=f'<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{transcribed_text}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n',
-#             stop=['<|eot_id|>'],
-#             stream=True,
-#         )
+    return transcription.text
 
-#         response_text = ""
-#         for event in completion:
-#             if not event.choices[0].finish_reason:
-#                 response_text += event.choices[0].text
-   
+if audio_file:
+    with st.spinner("Transcribing audio..."):
+        transcribed_text = transcribe_audio(audio_file)
+    
+    # Display the transcribed text as a user message
+    st.session_state.messages.append({"role": "user", "content": transcribed_text})
+    st.markdown(f'<div class="user-message">{transcribed_text}</div>', unsafe_allow_html=True)
+
+    with st.spinner("Generating response..."):
+        # Generate a response using the transcribed text
+        completion = client.completions.create(
+            model="meta-llama/Meta-Llama-3-8B-Instruct",
+            prompt=f'<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{transcribed_text}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n',
+            stop=['<|eot_id|>'],
+            stream=True,
+        )
+
+        response_text = ""
+        for event in completion:
+            if not event.choices[0].finish_reason:
+                response_text += event.choices[0].text
+
+        
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
+        st.markdown(f'<div class="assistant-message">{response_text}</div>', unsafe_allow_html=True)
+
+
 #Userinput
 if inputtext:
     st.session_state.messages.append({"role": "user", "content": inputtext})
@@ -113,3 +135,4 @@ if inputtext:
 
         st.session_state.messages.append({"role": "assistant", "content": response_text})
         st.markdown(f'<div class="assistant-message">{response_text}</div>', unsafe_allow_html=True)
+        inputtext = ""
